@@ -1,90 +1,70 @@
 import asyncio
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any, TypedDict
 
 import httpx2
-from fastapi import FastAPI
-from fastapi.logger import logger as fastAPI_logger  # convenient name
-from fastapi.requests import Request
-from fastapi.responses import Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.logger import logger
 
-SIZE_POOL_httpx = 100
+UPSTREAM_URL = "http://localhost:8080/test"
 
 
-class Singletonhttpx:
-    httpx_client: httpx2.AsyncClient | None = None
-
-    @classmethod
-    def get_httpx_client(cls) -> httpx2.AsyncClient:
-        if cls.httpx_client is None:
-            timeout = httpx2.Timeout(timeout=2)
-            limits = httpx2.Limits(max_keepalive_connections=5, max_connections=10)
-            cls.httpx_client = httpx2.AsyncClient(timeout=timeout, limits=limits, http2=True)
-
-        return cls.httpx_client
-
-    @classmethod
-    async def close_httpx_client(cls) -> None:
-        if cls.httpx_client:
-            await cls.httpx_client.aclose()
-            cls.httpx_client = None
-
-    @classmethod
-    async def query_url(cls, url: str) -> Any:
-        client = cls.get_httpx_client()
-
-        try:
-            response = await client.post(url)
-            if response.status_code != 200:
-                return {"ERROR OCCURED": response.text}
-
-            json_result = response.json()
-        except Exception as e:
-            return {"ERROR": str(e)}
-
-        return json_result
+class State(TypedDict):
+    http_client: httpx2.AsyncClient
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    fastAPI_logger.info("on_start_up")
-    Singletonhttpx.get_httpx_client()
-    yield
-    fastAPI_logger.info("on_shutdown")
-    await Singletonhttpx.close_httpx_client()
+async def lifespan(_app: FastAPI) -> AsyncIterator[State]:
+    """Open one shared AsyncClient at startup and close it at shutdown."""
+    timeout = httpx2.Timeout(timeout=2)
+    limits = httpx2.Limits(max_keepalive_connections=5, max_connections=10)
+    async with httpx2.AsyncClient(timeout=timeout, limits=limits, http2=True) as client:
+        logger.info("HTTP client opened")
+        yield {"http_client": client}
+    logger.info("HTTP client closed")
+
+
+def get_http_client(request: Request) -> httpx2.AsyncClient:
+    client: httpx2.AsyncClient = request.state.http_client
+    return client
+
+
+HTTPClient = Annotated[httpx2.AsyncClient, Depends(get_http_client)]
+
+
+async def fetch_json(client: httpx2.AsyncClient, url: str) -> dict[str, Any]:
+    """POST to an upstream URL and return its JSON body, mapping upstream failures to a 502."""
+    try:
+        response = await client.post(url)
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+    except (httpx2.HTTPError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
+    return result
 
 
 app = FastAPI(docs_url="/", lifespan=lifespan)
 
 
 @app.get("/endpoint")
-async def endpoint() -> Any:
-    url = "http://localhost:8080/test"
-
-    return await Singletonhttpx.query_url(url)
+async def endpoint(client: HTTPClient) -> dict[str, Any]:
+    return await fetch_json(client, UPSTREAM_URL)
 
 
 @app.get("/endpoint_multi")
-async def endpoint_multi() -> dict[str, int]:
-    url = "http://localhost:8080/test"
-
-    async_calls: list[Coroutine[Any, Any, Any]] = list()  # store all async operations
-
-    async_calls.append(Singletonhttpx.query_url(url))
-    async_calls.append(Singletonhttpx.query_url(url))
-
-    all_results: list[dict[Any, Any]] = await asyncio.gather(*async_calls)  # wait for all async operations
-    return {"success": sum([x["success"] for x in all_results])}
+async def endpoint_multi(client: HTTPClient) -> dict[str, int]:
+    # both upstream calls run concurrently
+    first, second = await asyncio.gather(fetch_json(client, UPSTREAM_URL), fetch_json(client, UPSTREAM_URL))
+    return {"success": first["success"] + second["success"]}
 
 
-@app.post("/endpoint_stream/")
+@app.post("/endpoint_stream")
 async def endpoint_stream(request: Request) -> Response:
-    body = b"RST"
+    body = bytearray(b"RST")
     async for chunk in request.stream():
         body += chunk
-
-    return Response(body, media_type="text/plain")
+    return Response(bytes(body), media_type="text/plain")
 
 
 if __name__ == "__main__":  # local dev

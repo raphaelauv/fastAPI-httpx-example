@@ -4,20 +4,14 @@
 
 ### This is an example with FastAPI, but you can use this logic with any async ( ASGI ) web framework
 
-
 ### [EXAMPLE FOR AIOHTTP](https://github.com/raphaelauv/fastAPI-aiohttp-example/)
 
+#### Implemented logic :
 
-#### Implemented logic : 
-
-(with a fake server mocking answer of httpx2, through `httpx2.MockTransport`)
-
-- Open AsyncClient at fastAPI startup
-
-- Close AsyncClient at fastAPI shutdown
-
-(both through a FastAPI `lifespan`)
-
+- Open one shared `AsyncClient` at FastAPI startup and close it at shutdown, in a FastAPI `lifespan`
+- Hand the client to endpoints through the lifespan state and `Depends`
+- Turn upstream failures (connection errors, non-2xx answers) into a `502`
+- Run several upstream calls concurrently with `asyncio.gather`
 
 ## Run
 
@@ -28,12 +22,12 @@ uv run python src/fastAPI_httpx/fastAPI.py
 
 ## Tests
 
+The tests swap the real client for a mocked one with `app.dependency_overrides`,
+so no real upstream server is needed.
+
 ```bash
 uv run pytest
 ```
-
-- fastAPI endpoint test
-- httpx2 test
 
 ### Why a custom `HTTPXMock` fixture?
 
