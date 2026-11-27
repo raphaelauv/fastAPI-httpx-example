@@ -1,5 +1,5 @@
 [project]
-name = "fastapi-httpx-example"
+name = "fastapi-httpx2-example"
 version = "0.1.0"
 description = "Full example of FastAPI with an httpx2 client"
 readme = "README.md"
