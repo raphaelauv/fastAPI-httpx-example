@@ -19,6 +19,18 @@
 (both through a FastAPI `lifespan`)
 
 
+## Run
+
+```bash
+uv sync --all-extras
+uv run python src/fastAPI_httpx/fastAPI.py
+```
+
 ## Tests
+
+```bash
+uv run pytest
+```
+
 - fastAPI endpoint test
 - httpx2 test

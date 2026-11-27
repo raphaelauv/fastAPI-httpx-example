@@ -1,5 +1,0 @@
-pytest
-pytest-asyncio
-fastapi
-httpx2[http2]
-# uvicorn[standard]
