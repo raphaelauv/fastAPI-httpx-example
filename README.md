@@ -34,3 +34,16 @@ uv run pytest
 
 - fastAPI endpoint test
 - httpx2 test
+
+### Why a custom `HTTPXMock` fixture?
+
+The tests mock outgoing httpx2 calls with a small `HTTPXMock` fixture built on
+[`httpx2.MockTransport`](https://github.com/pydantic/httpx2/blob/main/docs/advanced/transports.md),
+because there is no official httpx2 equivalent of `pytest_httpx`'s `HTTPXMock` yet:
+
+- [pytest_httpx](https://github.com/Colin-b/pytest_httpx) only supports `httpx` (it pins `httpx==0.28.*`).
+- [pytest-httpx2](https://github.com/lundberg/pytest-httpx2) exists, but it builds on respx, which still
+  depends on `httpx` and is typed around `httpx.Response`.
+
+Once [respx ships httpx2 support](https://github.com/lundberg/respx/issues/316), the fixture can be
+replaced by it.
