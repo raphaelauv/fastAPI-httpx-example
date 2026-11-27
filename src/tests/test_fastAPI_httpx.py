@@ -4,7 +4,7 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from fastAPI_httpx.fastAPI import app, Singletonhttpx
+from fastAPI_httpx.fastAPI import Singletonhttpx, app
 
 
 class HTTPXMock:
@@ -60,24 +60,24 @@ async def test_query_url_error_status(httpx_mock: HTTPXMock) -> None:
 def test_endpoint(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
     httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 1})
 
-    result: httpx2.Response = client_fastAPI.get(url='/endpoint')
-    assert result.json() == {'success': 1}
+    result: httpx2.Response = client_fastAPI.get(url="/endpoint")
+    assert result.json() == {"success": 1}
 
 
 def test_endpoint_multi(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
     httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 1})
     httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 2})
 
-    result: httpx2.Response = client_fastAPI.get(url='/endpoint_multi')
-    assert result.json() == {'success': 3}
+    result: httpx2.Response = client_fastAPI.get(url="/endpoint_multi")
+    assert result.json() == {"success": 3}
 
 
 def test_endpoint_stream(client_fastAPI: TestClient) -> None:
-    data = b'TOTO' * 10000
+    data = b"TOTO" * 10000
 
-    with client_fastAPI.stream('POST', url='/endpoint_stream/', content=data) as result:
+    with client_fastAPI.stream("POST", url="/endpoint_stream/", content=data) as result:
         result.read()
-        assert result.content == b'RST' + data
+        assert result.content == b"RST" + data
 
 
 def test_lifespan_opens_and_closes_client() -> None:

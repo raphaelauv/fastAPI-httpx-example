@@ -58,14 +58,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(docs_url="/", lifespan=lifespan)
 
 
-@app.get('/endpoint')
+@app.get("/endpoint")
 async def endpoint() -> Any:
     url = "http://localhost:8080/test"
 
     return await Singletonhttpx.query_url(url)
 
 
-@app.get('/endpoint_multi')
+@app.get("/endpoint_multi")
 async def endpoint_multi() -> dict[str, int]:
     url = "http://localhost:8080/test"
 
@@ -75,19 +75,19 @@ async def endpoint_multi() -> dict[str, int]:
     async_calls.append(Singletonhttpx.query_url(url))
 
     all_results: list[dict[Any, Any]] = await asyncio.gather(*async_calls)  # wait for all async operations
-    return {'success': sum([x['success'] for x in all_results])}
+    return {"success": sum([x["success"] for x in all_results])}
 
 
 @app.post("/endpoint_stream/")
 async def endpoint_stream(request: Request) -> Response:
-    body = b'RST'
+    body = b"RST"
     async for chunk in request.stream():
         body += chunk
 
-    return Response(body, media_type='text/plain')
+    return Response(body, media_type="text/plain")
 
 
-if __name__ == '__main__':  # local dev
+if __name__ == "__main__":  # local dev
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

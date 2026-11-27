@@ -14,14 +14,20 @@ server = ["uvicorn[standard]"]
 
 [dependency-groups]
 dev = [
-    "flake8",
     "mypy",
     "pytest",
     "pytest-asyncio",
+    "ruff",
 ]
 
 [tool.uv]
 package = false
+
+[tool.ruff]
+line-length = 127
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C90"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
