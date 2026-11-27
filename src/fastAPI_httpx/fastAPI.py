@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any, TypedDict
 
 import httpx2
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.logger import logger
 
-UPSTREAM_URL = "http://localhost:8080/test"
+from fastAPI_httpx.http_client import UPSTREAM_URL, HTTPClient, fetch_json
+from fastAPI_httpx.services import Report
 
 
 class State(TypedDict):
@@ -25,25 +26,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[State]:
     logger.info("HTTP client closed")
 
 
-def get_http_client(request: Request) -> httpx2.AsyncClient:
-    client: httpx2.AsyncClient = request.state.http_client
-    return client
-
-
-HTTPClient = Annotated[httpx2.AsyncClient, Depends(get_http_client)]
-
-
-async def fetch_json(client: httpx2.AsyncClient, url: str) -> dict[str, Any]:
-    """POST to an upstream URL and return its JSON body, mapping upstream failures to a 502."""
-    try:
-        response = await client.post(url)
-        response.raise_for_status()
-        result: dict[str, Any] = response.json()
-    except (httpx2.HTTPError, ValueError) as e:
-        raise HTTPException(status_code=502, detail=f"Upstream error: {e}") from e
-    return result
-
-
 app = FastAPI(docs_url="/", lifespan=lifespan)
 
 
@@ -57,6 +39,12 @@ async def endpoint_multi(client: HTTPClient) -> dict[str, int]:
     # both upstream calls run concurrently
     first, second = await asyncio.gather(fetch_json(client, UPSTREAM_URL), fetch_json(client, UPSTREAM_URL))
     return {"success": first["success"] + second["success"]}
+
+
+@app.get("/endpoint_complex_codebase")
+async def endpoint_complex_codebase(report: Report, calls: Annotated[int, Query(ge=1, le=10)] = 3) -> dict[str, int]:
+    # the endpoint asks for a service, not for the HTTP client (see services.py)
+    return await report.build_report(calls)
 
 
 @app.post("/endpoint_stream")
