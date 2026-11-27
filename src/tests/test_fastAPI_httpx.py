@@ -5,7 +5,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from fastAPI_httpx.fastAPI import UPSTREAM_URL, app, fetch_json, get_http_client, lifespan
+from fastAPI_httpx.fastAPI import app, lifespan
+from fastAPI_httpx.http_client import UPSTREAM_URL, fetch_json, get_http_client
 
 
 class HTTPXMock:
@@ -75,6 +76,28 @@ def test_endpoint_multi(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> No
     httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 1})
     httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 2})
     assert client_fastAPI.get("/endpoint_multi").json() == {"success": 3}
+
+
+def test_endpoint_complex_codebase(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
+    # the single get_http_client override reaches the client deep inside ReportService -> UpstreamAPI
+    for value in (1, 2, 3):
+        httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": value})
+    assert client_fastAPI.get("/endpoint_complex_codebase").json() == {"calls": 3, "success": 6}
+
+
+def test_endpoint_complex_codebase_calls_param(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 5})
+    assert client_fastAPI.get("/endpoint_complex_codebase", params={"calls": 1}).json() == {"calls": 1, "success": 5}
+
+
+def test_endpoint_complex_codebase_upstream_error(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, status_code=503)
+    assert client_fastAPI.get("/endpoint_complex_codebase", params={"calls": 1}).status_code == 502
+
+
+def test_endpoint_complex_codebase_calls_bounds(client_fastAPI: TestClient) -> None:
+    assert client_fastAPI.get("/endpoint_complex_codebase", params={"calls": 0}).status_code == 422
+    assert client_fastAPI.get("/endpoint_complex_codebase", params={"calls": 11}).status_code == 422
 
 
 def test_endpoint_stream(client_fastAPI: TestClient) -> None:

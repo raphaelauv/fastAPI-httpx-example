@@ -12,6 +12,37 @@
 - Hand the client to endpoints through the lifespan state and `Depends`
 - Turn upstream failures (connection errors, non-2xx answers) into a `502`
 - Run several upstream calls concurrently with `asyncio.gather`
+- Use the client deep in a codebase without passing it through every function (`/endpoint_complex_codebase`)
+
+#### Code layout
+
+- [`fastAPI.py`](src/fastAPI_httpx/fastAPI.py): the app, its `lifespan` and the endpoints
+- [`http_client.py`](src/fastAPI_httpx/http_client.py): the `HTTPClient` dependency and the `fetch_json` helper
+- [`services.py`](src/fastAPI_httpx/services.py): service classes used by `/endpoint_complex_codebase`
+
+#### Using the client deep in your code
+
+`/endpoint` and `/endpoint_multi` receive the client with `Depends` and pass it as an argument.
+That's fine for one level, but in a real codebase the HTTP call is often several functions deep.
+
+`/endpoint_complex_codebase` shows how to avoid passing the client through every call:
+each class receives what it needs **once, in its constructor**, and FastAPI builds the chain for every request.
+
+```text
+endpoint_complex_codebase(report: Report)       # only asks for the service
+  -> ReportService(upstream: UpstreamAPI)       # business logic, never sees the client
+       -> UpstreamAPI(client: HTTPClient)       # the only class that talks HTTP
+            -> httpx2.AsyncClient               # opened and closed by the lifespan
+```
+
+Inside the classes, methods use `self.upstream` / `self.client`, so no call takes the client as an argument.
+Tests still swap the client in one place: overriding `get_http_client` reaches it deep inside `UpstreamAPI`.
+
+| Where the client lives | You write | Cost |
+|---|---|---|
+| Function arguments | `f(client, ...)` at every level | Verbose once the calls get deep |
+| An object (this repo's services) | One `Depends` per endpoint, `self.client` inside | Needs a class |
+| A module global set by the lifespan | `get_client()` anywhere | Hidden dependency; tests must patch the global |
 
 ## Run
 
