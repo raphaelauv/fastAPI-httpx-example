@@ -2,9 +2,10 @@ from collections.abc import Iterator
 
 import httpx2
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from fastAPI_httpx.fastAPI import Singletonhttpx, app
+from fastAPI_httpx.fastAPI import UPSTREAM_URL, app, fetch_json, get_http_client, lifespan
 
 
 class HTTPXMock:
@@ -15,11 +16,12 @@ class HTTPXMock:
 
     def __init__(self) -> None:
         self._responses: dict[tuple[str, str], list[httpx2.Response]] = {}
+        self.client = httpx2.AsyncClient(transport=httpx2.MockTransport(self._handler))
 
     def add_response(self, method: str, url: str, status_code: int = 200, json: object = None) -> None:
         self._responses.setdefault((method, url), []).append(httpx2.Response(status_code, json=json))
 
-    def handler(self, request: httpx2.Request) -> httpx2.Response:
+    def _handler(self, request: httpx2.Request) -> httpx2.Response:
         queue = self._responses.get((request.method, str(request.url)))
         assert queue, f"No response registered for {request.method} {request.url}"
         return queue.pop(0)
@@ -32,55 +34,58 @@ class HTTPXMock:
 @pytest.fixture
 def httpx_mock() -> Iterator[HTTPXMock]:
     mock = HTTPXMock()
-    Singletonhttpx.httpx_client = httpx2.AsyncClient(transport=httpx2.MockTransport(mock.handler))
     yield mock
-    Singletonhttpx.httpx_client = None
     mock.assert_all_responses_used()
 
 
 @pytest.fixture
-def client_fastAPI() -> TestClient:
-    return TestClient(app=app)
+def client_fastAPI(httpx_mock: HTTPXMock) -> Iterator[TestClient]:
+    """Test client whose endpoints receive the mocked httpx2 client."""
+    app.dependency_overrides[get_http_client] = lambda: httpx_mock.client
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
-async def test_query_url(httpx_mock: HTTPXMock) -> None:
+async def test_fetch_json(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="POST", url="http://test/toto", json={"result": 2})
-    rst = await Singletonhttpx.query_url("http://test/toto")
-    assert rst == {"result": 2}
+    assert await fetch_json(httpx_mock.client, "http://test/toto") == {"result": 2}
 
 
 @pytest.mark.asyncio
-async def test_query_url_error_status(httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url="http://test/toto", status_code=500, json="boom")
-    rst = await Singletonhttpx.query_url("http://test/toto")
-    assert rst == {"ERROR OCCURED": '"boom"'}
+async def test_fetch_json_upstream_error(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="POST", url="http://test/toto", status_code=500)
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_json(httpx_mock.client, "http://test/toto")
+    assert exc_info.value.status_code == 502
 
 
 def test_endpoint(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
-    httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 1})
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 1})
+    assert client_fastAPI.get("/endpoint").json() == {"success": 1}
 
-    result: httpx2.Response = client_fastAPI.get(url="/endpoint")
-    assert result.json() == {"success": 1}
+
+def test_endpoint_upstream_error(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, status_code=503)
+    assert client_fastAPI.get("/endpoint").status_code == 502
 
 
 def test_endpoint_multi(httpx_mock: HTTPXMock, client_fastAPI: TestClient) -> None:
-    httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 1})
-    httpx_mock.add_response(method="POST", url="http://localhost:8080/test", json={"success": 2})
-
-    result: httpx2.Response = client_fastAPI.get(url="/endpoint_multi")
-    assert result.json() == {"success": 3}
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 1})
+    httpx_mock.add_response(method="POST", url=UPSTREAM_URL, json={"success": 2})
+    assert client_fastAPI.get("/endpoint_multi").json() == {"success": 3}
 
 
 def test_endpoint_stream(client_fastAPI: TestClient) -> None:
     data = b"TOTO" * 10000
-
-    with client_fastAPI.stream("POST", url="/endpoint_stream/", content=data) as result:
-        result.read()
-        assert result.content == b"RST" + data
+    response = client_fastAPI.post("/endpoint_stream", content=data)
+    assert response.content == b"RST" + data
 
 
-def test_lifespan_opens_and_closes_client() -> None:
-    with TestClient(app=app):
-        assert Singletonhttpx.httpx_client is not None
-    assert Singletonhttpx.httpx_client is None
+@pytest.mark.asyncio
+async def test_lifespan_opens_and_closes_client() -> None:
+    async with lifespan(app) as state:
+        client = state["http_client"]
+        assert not client.is_closed
+    assert client.is_closed
