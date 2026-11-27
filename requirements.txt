@@ -1,6 +1,5 @@
 pytest
 pytest-asyncio
-pytest_httpx
 fastapi
-httpx[http2]
+httpx2[http2]
 # uvicorn[standard]

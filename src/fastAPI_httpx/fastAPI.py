@@ -1,9 +1,9 @@
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
+from typing import Any
 
-from typing import List, Optional, Any, Dict
-
-import httpx
+import httpx2
 from fastapi import FastAPI
 from fastapi.logger import logger as fastAPI_logger  # convenient name
 from fastapi.requests import Request
@@ -13,21 +13,21 @@ SIZE_POOL_httpx = 100
 
 
 class Singletonhttpx:
-    httpx_client: Optional[httpx.AsyncClient] = None
+    httpx_client: httpx2.AsyncClient | None = None
 
     @classmethod
-    def get_httpx_client(cls) -> httpx.AsyncClient:
+    def get_httpx_client(cls) -> httpx2.AsyncClient:
         if cls.httpx_client is None:
-            timeout = httpx.Timeout(timeout=2)
-            limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
-            cls.httpx_client = httpx.AsyncClient(timeout=timeout, limits=limits, http2=True)
+            timeout = httpx2.Timeout(timeout=2)
+            limits = httpx2.Limits(max_keepalive_connections=5, max_connections=10)
+            cls.httpx_client = httpx2.AsyncClient(timeout=timeout, limits=limits, http2=True)
 
         return cls.httpx_client
 
     @classmethod
     async def close_httpx_client(cls) -> None:
         if cls.httpx_client:
-            await cls.httpx_client.close()
+            await cls.httpx_client.aclose()
             cls.httpx_client = None
 
     @classmethod
@@ -37,26 +37,25 @@ class Singletonhttpx:
         try:
             response = await client.post(url)
             if response.status_code != 200:
-                return {"ERROR OCCURED" + str(await response.text())}
+                return {"ERROR OCCURED": response.text}
 
             json_result = response.json()
         except Exception as e:
-            return {"ERROR": e}
+            return {"ERROR": str(e)}
 
         return json_result
 
 
-async def on_start_up() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     fastAPI_logger.info("on_start_up")
     Singletonhttpx.get_httpx_client()
-
-
-async def on_shutdown() -> None:
+    yield
     fastAPI_logger.info("on_shutdown")
     await Singletonhttpx.close_httpx_client()
 
 
-app = FastAPI(docs_url="/", on_startup=[on_start_up], on_shutdown=[on_shutdown])
+app = FastAPI(docs_url="/", lifespan=lifespan)
 
 
 @app.get('/endpoint')
@@ -67,20 +66,20 @@ async def endpoint() -> Any:
 
 
 @app.get('/endpoint_multi')
-async def endpoint_multi() -> Dict[str, int]:
+async def endpoint_multi() -> dict[str, int]:
     url = "http://localhost:8080/test"
 
-    async_calls: List[Coroutine[Any, Any, Any]] = list()  # store all async operations
+    async_calls: list[Coroutine[Any, Any, Any]] = list()  # store all async operations
 
     async_calls.append(Singletonhttpx.query_url(url))
     async_calls.append(Singletonhttpx.query_url(url))
 
-    all_results: List[Dict[Any, Any]] = await asyncio.gather(*async_calls)  # wait for all async operations
+    all_results: list[dict[Any, Any]] = await asyncio.gather(*async_calls)  # wait for all async operations
     return {'success': sum([x['success'] for x in all_results])}
 
 
 @app.post("/endpoint_stream/")
-async def endpoint_stream(request: Request):
+async def endpoint_stream(request: Request) -> Response:
     body = b'RST'
     async for chunk in request.stream():
         body += chunk
