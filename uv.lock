@@ -140,7 +140,7 @@ wheels = [
 ]
 
 [[package]]
-name = "fastapi-httpx-example"
+name = "fastapi-httpx2-example"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

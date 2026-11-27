@@ -1,4 +1,4 @@
-![Python](https://github.com/raphaelauv/fastAPI-httpx-example/workflows/Python/badge.svg?branch=main)
+![Python](https://github.com/raphaelauv/fastAPI-httpx2-example/workflows/Python/badge.svg?branch=main)
 
 # Full example of [FastAPI](https://github.com/tiangolo/fastapi) with a [httpx2](https://github.com/pydantic/httpx2) client
 
